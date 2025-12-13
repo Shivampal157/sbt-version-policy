@@ -1,10 +1,9 @@
 package sbtversionpolicy.internal
 
 import coursier.version.{ModuleMatchers, VersionCompatibility}
-import sbt.Compile
-import sbt.librarymanagement.{ConfigurationReport, CrossVersion, ModuleID}
+import sbt.{Compile, Runtime}
+import sbt.librarymanagement._
 import sbt.util.Logger
-import sbt.librarymanagement.{DependencyResolution, ScalaModuleInfo, UnresolvedWarningConfiguration, UpdateConfiguration}
 import sbtversionpolicy.DependencyCheckReport
 
 object DependencyCheck {
@@ -19,14 +18,15 @@ object DependencyCheck {
   ): Map[(String, String), String] =
     report
       .modules
-      .filter(!_.evicted)
+      .filterNot(_.evicted)
       .map(_.module)
       .filter(module => !excludedModules.contains(module.organization -> module.name))
       .map { mod =>
-        val name = CrossVersion(mod.crossVersion, scalaVersion, scalaBinaryVersion)
-          .fold(mod.name)(_(mod.name))
-        // TODO Check mod.explicitArtifacts too?
-        (mod.organization, name) -> moduleToVersion.applyOrElse(mod, (m: ModuleID) => m.revision)
+        val name =
+          CrossVersion(mod.crossVersion, scalaVersion, scalaBinaryVersion)
+            .fold(mod.name)(_(mod.name))
+        (mod.organization, name) ->
+          moduleToVersion.applyOrElse(mod, (m: ModuleID) => m.revision)
       }
       .groupBy(_._1)
       .map {
@@ -53,27 +53,39 @@ object DependencyCheck {
     log: Logger
   ): DependencyCheckReport = {
 
-    val previousModuleId0 = previousModuleId
-      .withName(CrossVersion(previousModuleId.crossVersion, sv, sbv).fold(previousModuleId.name)(_(previousModuleId.name)))
-      .withCrossVersion(CrossVersion.disabled)
-      .withExplicitArtifacts(Vector.empty)
+    val previousModuleId0 =
+      previousModuleId
+        .withName(
+          CrossVersion(previousModuleId.crossVersion, sv, sbv)
+            .fold(previousModuleId.name)(_(previousModuleId.name))
+        )
+        .withCrossVersion(CrossVersion.disabled)
+        .withExplicitArtifacts(Vector.empty)
 
-    val mod = depRes.moduleDescriptor(
-      ModuleID("dummy-org", "dummy-name", "1.0"),
-      Vector(previousModuleId0),
-      scalaModuleInf
-    )
+    val mod =
+      depRes.moduleDescriptor(
+        ModuleID("dummy-org", "dummy-name", "1.0"),
+        Vector(previousModuleId0),
+        scalaModuleInf
+      )
 
-    val previousReport = depRes.update(mod, updateConfig, warningConfig, log)
-      .fold(thing => throw thing.resolveException, identity)
-    val previousCompileReport = previousReport.configuration(Compile).getOrElse {
-      sys.error(s"Compile configuration not found in previous update report $previousReport")
+    val previousReport =
+      depRes.update(mod, updateConfig, warningConfig, log)
+        .fold(thing => throw thing.resolveException, identity)
+
+    val previousDependencies =
+  Seq(
+    previousReport.configuration(Compile),
+    previousReport.configuration(Runtime)
+  ).flatten
+    .flatMap { conf =>
+      modulesOf(conf, excludedModules, sv, sbv, moduleToVersion, log)
     }
-    val previousDependencies = DependencyCheck.modulesOf(previousCompileReport, excludedModules, sv, sbv, moduleToVersion, log)
-      .filterKeys {
-        case (org, name) =>
-          org != previousModuleId0.organization || name != previousModuleId0.name
-      }
+    .filter {
+      case ((org, name), _) =>
+        org != previousModuleId0.organization || name != previousModuleId0.name
+    }
+    .toMap   
 
     DependencyCheckReport(
       currentDependencies,

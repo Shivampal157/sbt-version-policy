@@ -42,7 +42,7 @@ jobs:
           distribution: adopt
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1.1.6
+      - uses: sbt/setup-sbt@v1.1
 
       - name: Release
         run: sbt versionCheck ci-release

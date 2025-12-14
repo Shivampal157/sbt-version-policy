@@ -74,13 +74,16 @@ object DependencyCheck {
         .fold(thing => throw thing.resolveException, identity)
 
     val previousDependencies =
-  Seq(
-    previousReport.configuration(Compile),
-    previousReport.configuration(Runtime)
-  ).flatten
-    .flatMap { conf =>
-      modulesOf(conf, excludedModules, sv, sbv, moduleToVersion, log)
-    }
+  modulesOf(
+    previousReport.configuration(Runtime).getOrElse {
+      throw new IllegalStateException("Missing previous dependency report")
+    },
+    excludedModules,
+    sv,
+    sbv,
+    moduleToVersion,
+    log
+  )
     .filter {
       case ((org, name), _) =>
         org != previousModuleId0.organization || name != previousModuleId0.name
